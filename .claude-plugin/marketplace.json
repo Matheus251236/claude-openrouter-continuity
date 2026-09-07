@@ -1,0 +1,11 @@
+{
+  "name": "claude-continuity-lab",
+  "owner": { "name": "Claude Continuity Lab" },
+  "metadata": { "description": "Plugin experimental de continuidade para Claude Code Desktop." },
+  "plugins": [{
+    "name": "openrouter-continuity",
+    "source": "./plugins/openrouter-continuity",
+    "description": "Diagnóstico de limites e protótipo de transporte com fallback. Integração à sessão Desktop ainda não validada.",
+    "version": "0.1.0"
+  }]
+}

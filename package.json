@@ -1,0 +1,11 @@
+{
+  "name": "claude-openrouter-continuity",
+  "version": "0.1.0-experimental",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "validate": "node scripts/validate.mjs"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "openrouter-continuity",
+  "version": "0.1.0",
+  "description": "Experimental: registra erros de limite e expõe diagnóstico. Não ativa a troca de provedor no Desktop nesta versão.",
+  "author": { "name": "Claude Continuity Lab" }
+}
