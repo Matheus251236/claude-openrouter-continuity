@@ -51,7 +51,7 @@ node --test tests/*.test.mjs
 node scripts/verify.mjs
 ```
 
-Sem dependências npm. O workflow de CI está preparado para Windows e Linux. A execução local foi feita no Windows; o CI remoto precisa ser executado após publicação.
+Sem dependências npm. Os 26 testes passaram localmente no Windows e no GitHub Actions em Windows e Linux. Esses testes usam respostas simuladas: não validam a integração com uma sessão real do Claude Desktop.
 
 O módulo está em `plugins/openrouter-continuity/src/transport.mjs`. Ele permanece desabilitado por padrão. `enabled: true` e uma chave passada em memória habilitam fallback somente para o chamador que explicitamente usar `send()`. Não existe serviço de rede aberto, inicialização automática de proxy ou ativação de cobrança nesta versão.
 
