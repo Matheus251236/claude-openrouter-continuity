@@ -25,12 +25,13 @@ for (const path of [...handler.args, ...mcp.mcpServers.continuity.args]) {
   assert.ok(path.startsWith('${CLAUDE_PLUGIN_ROOT}/'));
   await access(join(root, pluginRoot, path.replace('${CLAUDE_PLUGIN_ROOT}/', '')));
 }
+await access(join(root, pluginRoot, 'scripts/restart-to-gateway.ps1'));
 async function inspect(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     if (['.git', 'runtime', 'node_modules'].includes(entry.name)) continue;
     const path = join(dir, entry.name);
     if (entry.isDirectory()) await inspect(path);
-    else if (/\.(json|mjs|md|yml|vbs)$/.test(path)) {
+    else if (/\.(json|mjs|md|yml|vbs|ps1)$/.test(path)) {
       const text = await readFile(path, 'utf8');
       const credentialPatterns = [
         /sk-(?:or-v1-|proj-)[a-zA-Z0-9_-]{16,}/,

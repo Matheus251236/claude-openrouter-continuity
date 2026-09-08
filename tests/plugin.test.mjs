@@ -4,7 +4,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
-import { recordFailure, status, dataDir } from '../plugins/openrouter-continuity/scripts/state.mjs';
+import { recordFailure, status, dataDir, setRecoveryArmed } from '../plugins/openrouter-continuity/scripts/state.mjs';
+import { recoveryCommand } from '../plugins/openrouter-continuity/scripts/recovery.mjs';
 
 async function fixture(t) {
   const dir = await mkdtemp(join(tmpdir(), 'continuity-test-'));
@@ -40,6 +41,46 @@ test('missing plugin data directory never writes into the project implicitly', (
   assert.throws(() => dataDir({}), /unavailable/);
 });
 
+test('automatic recovery is opt-in and stores no gateway credential', async t => {
+  const dir = await fixture(t);
+  assert.equal((await status(dir)).automaticRecoveryArmed, false);
+  await setRecoveryArmed(dir, true);
+  const configText = await readFile(join(dir, 'recovery-config.json'), 'utf8');
+  assert.equal(configText.includes('key'), false);
+  assert.equal(configText.includes('token'), false);
+  const result = await status(dir);
+  assert.equal(result.automaticRecoveryArmed, true);
+  assert.equal(result.requiresConfiguredGateway, true);
+  await setRecoveryArmed(dir, false);
+  assert.equal((await status(dir)).automaticRecoveryArmed, false);
+});
+
+test('Windows recovery command is hidden, detached and receives only the plugin data path', () => {
+  const spec = recoveryCommand('C:\\test-data', 'C:\\plugin-root');
+  if (process.platform !== 'win32') return assert.equal(spec, null);
+  assert.equal(spec.command, 'powershell.exe');
+  assert.deepEqual(spec.args.slice(0, 6), ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden']);
+  assert.equal(spec.args.at(-1), 'C:\\test-data');
+  assert.equal(spec.args.join(' ').toLowerCase().includes('key'), false);
+  assert.equal(spec.args.join(' ').toLowerCase().includes('token'), false);
+});
+
+test('Windows recovery helper passes a dry run without closing or launching Claude', { skip: process.platform !== 'win32' }, async t => {
+  const dir = await fixture(t);
+  const script = resolve('plugins/openrouter-continuity/scripts/restart-to-gateway.ps1');
+  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-DataDir', dir, '-DryRun'], {
+    windowsHide: true, stdio: ['ignore', 'pipe', 'pipe']
+  });
+  let output = '', stderr = '';
+  child.stdout.on('data', chunk => output += chunk);
+  child.stderr.on('data', chunk => stderr += chunk);
+  const code = await new Promise((resolve, reject) => { child.on('error', reject); child.on('close', resolve); });
+  assert.equal(code, 0, stderr);
+  const result = JSON.parse(output);
+  assert.equal(result.ready, true);
+  assert.equal(result.wouldForceKill, false);
+});
+
 test('MCP process initializes and returns truthful integration status over stdio', async t => {
   const dir = await fixture(t);
   const child = spawn(process.execPath, [resolve('plugins/openrouter-continuity/scripts/mcp.mjs')], {
@@ -59,16 +100,21 @@ test('MCP process initializes and returns truthful integration status over stdio
     { id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'test', version: '1' } } },
     { method: 'notifications/initialized' },
     { id: 2, method: 'tools/list' },
-    { id: 3, method: 'tools/call', params: { name: 'continuity_status', arguments: {} } }
+    { id: 3, method: 'tools/call', params: { name: 'continuity_status', arguments: {} } },
+    { id: 4, method: 'tools/call', params: { name: 'continuity_set_recovery', arguments: { enabled: true } } },
+    { id: 5, method: 'tools/call', params: { name: 'continuity_status', arguments: {} } }
   ]) child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
   child.stdin.end();
   assert.equal(await closed, 0);
   assert.equal(stderr, '');
   const replies = output.trim().split('\n').map(JSON.parse);
-  assert.equal(replies.length, 3);
+  assert.equal(replies.length, 5);
   assert.equal(replies[0].result.protocolVersion, '2025-03-26');
   assert.equal(replies[1].result.tools[0].name, 'continuity_status');
+  assert.equal(replies[1].result.tools[1].name, 'continuity_set_recovery');
   assert.equal(JSON.parse(replies[2].result.content[0].text).desktopRoutingAttached, false);
+  assert.equal(JSON.parse(replies[3].result.content[0].text).enabled, true);
+  assert.equal(JSON.parse(replies[4].result.content[0].text).automaticRecoveryArmed, true);
 });
 
 test('command hook executes with stdin and path arguments without Bash', async t => {

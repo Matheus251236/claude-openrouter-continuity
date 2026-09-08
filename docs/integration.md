@@ -18,7 +18,7 @@ Não executamos injeção de código, patch de `app.asar`, leitura de tokens, ca
 
 ## Evidência documental
 
-A [configuração Desktop](https://code.claude.com/docs/en/llm-gateway-connect#desktop-app) usa as preferências de inferência de terceiros, separadas das variáveis usadas pela CLI. O [guia OpenRouter](https://openrouter.ai/docs/cookbook/coding-agents/claude-desktop-integration) descreve aplicar a configuração, reiniciar e entrar com Gateway. Esse fluxo não atende à manutenção da sessão atual solicitada.
+A [configuração Desktop](https://code.claude.com/docs/en/llm-gateway-connect#desktop-app) usa as preferências de inferência de terceiros, separadas das variáveis usadas pela CLI. O [guia OpenRouter](https://openrouter.ai/docs/cookbook/coding-agents/claude-desktop-integration) descreve aplicar a configuração, reiniciar e entrar com Gateway. A versão 0.2 automatiza somente esse reinício e a escolha do Gateway já configurado; ela não transforma esse fluxo em hot-swap.
 
 O [evento StopFailure](https://code.claude.com/docs/en/hooks#stopfailure) informa erros de API. Seu retorno não fornece uma decisão de substituição da resposta ou do provedor. Por isso, este plugin usa o evento apenas como evidência diagnóstica.
 
@@ -38,18 +38,27 @@ createContinuityTransport().send(requisição, headers da sessão)
                  +--> OpenRouter, credencial separada --> chamador
 
 Plugin instalado --> StopFailure --> registro local mínimo
-                 --> MCP continuity_status --> estado da integração
+                 |               --> se armado: fechamento normal
+                 |                              --> reabre Desktop
+                 |                              --> seleciona Gateway
+                 +--> MCP continuity_status / continuity_set_recovery
 ```
 
 O módulo de transporte não lê credenciais por conta própria. O futuro adaptador precisaria receber a requisição que o cliente já ia enviar e mantê-la no mesmo fluxo. Seus destinos são fixos e HTTPS: Anthropic primário, OpenRouter secundário. O retorno da segunda chamada continua no mesmo `send()`; nenhuma sessão é criada por esse módulo.
 
 As mensagens e IDs de ferramentas permanecem intactos no teste. Metadados externos de conta e headers de autenticação não são repassados para o segundo provedor. Nenhum conteúdo de requisição ou erro bruto é registrado.
 
+## Recuperação experimental 0.2
+
+O auxiliar Windows usa UI Automation apenas na janela do processo Claude. Ele não lê nem grava a chave do Gateway. A configuração fica sob responsabilidade do formulário oficial do Desktop. Se o aplicativo não fechar normalmente, nenhum processo é forçado. O recurso é opt-in e fica desarmado após a instalação.
+
+O teste `DryRun` carrega as bibliotecas de UI Automation e valida os argumentos sem fechar ou abrir aplicativos. O teste real ainda exige configurar o OpenRouter, reiniciar o Desktop e comprovar que a sessão salva volta a abrir no Gateway.
+
 ## Próxima etapa necessária
 
 Investigar com a Anthropic uma extensão de transporte na aba Code que permita conectar o intermediário a uma sessão ativa. Se um ponto suportado aparecer, criar um adaptador pequeno e específico à versão e testá-lo primeiro em uma sessão descartável. O acesso ao GitHub permite publicar o código, mas não resolve este bloqueio técnico. Uma chave OpenRouter também não o resolve sozinha.
 
-Caso seja necessário mudar o requisito para iniciar uma sessão já configurada com gateway, isso será uma alternativa de produto, e deverá ser explicitado. Não apresentar a troca de login, uma nova sessão ou um terminal escondido como se fossem a manutenção da sessão atual.
+Para validar a recuperação, configurar o Gateway pelo formulário oficial, manter o recurso desarmado, realizar um reinício manual e confirmar que o Desktop conserva a sessão. Só então armar o fechamento automático. Não apresentar o reinício como hot-swap dentro do processo.
 
 ## Testes de aceitação ainda pendentes
 

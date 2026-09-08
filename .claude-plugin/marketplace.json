@@ -5,7 +5,7 @@
   "plugins": [{
     "name": "openrouter-continuity",
     "source": "./plugins/openrouter-continuity",
-    "description": "Diagnóstico de limites e protótipo de transporte com fallback. Integração à sessão Desktop ainda não validada.",
-    "version": "0.1.0"
+    "description": "Diagnóstico de limites e recuperação experimental por reinício no Gateway configurado. Desativada por padrão.",
+    "version": "0.2.0"
   }]
 }
