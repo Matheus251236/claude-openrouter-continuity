@@ -1,6 +1,14 @@
 node_modules/
 .env
 .env.*
+.npmrc
+.netrc
+credentials.json
+secrets.json
+*.pem
+*.key
+*.p12
+*.pfx
 *.log
 *.local.json
 runtime/

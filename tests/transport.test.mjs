@@ -13,12 +13,12 @@ const body = {
   ],
   metadata: { user_id: 'private-account-session' }
 };
-const auth = { authorization: 'Bearer FAKE_ANTHROPIC_CREDENTIAL', cookie: 'private-cookie', 'anthropic-beta': 'oauth-test' };
+const auth = { authorization: 'Bearer unit-test-primary', cookie: 'private-cookie', 'anthropic-beta': 'oauth-test' };
 const error = (type = 'rate_limit_error', status = 429) => new Response(JSON.stringify({ type: 'error', error: { type } }), { status, headers: { 'content-type': 'application/json' } });
 const ok = () => new Response(JSON.stringify({ type: 'message', content: [{ type: 'text', text: 'continued' }] }), { headers: { 'content-type': 'application/json' } });
 function harness(responses, options = {}) {
   const calls = [];
-  const transport = createContinuityTransport({ enabled: true, openRouterKey: 'FAKE_OPENROUTER_KEY',
+  const transport = createContinuityTransport({ enabled: true, openRouterKey: 'unit-test-fallback',
     fetchImpl: async (url, init) => { calls.push({ url, ...init }); return responses.shift()(); }, ...options });
   return { calls, transport };
 }
@@ -38,7 +38,7 @@ test('429 falls back within the same request, preserving all conversation and to
 test('Anthropic credentials, OAuth headers and account metadata never reach OpenRouter', async () => {
   const { transport, calls } = harness([error, ok]);
   await transport.send(body, auth);
-  assert.equal(calls[1].headers.get('authorization'), 'Bearer FAKE_OPENROUTER_KEY');
+  assert.equal(calls[1].headers.get('authorization'), 'Bearer unit-test-fallback');
   for (const header of ['cookie', 'x-api-key', 'anthropic-beta']) assert.equal(calls[1].headers.has(header), false);
   assert.equal(calls[1].body.includes('private-account-session'), false);
   assert.equal(calls[0].headers.has('cookie'), false);

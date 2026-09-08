@@ -32,7 +32,18 @@ async function inspect(dir) {
     if (entry.isDirectory()) await inspect(path);
     else if (/\.(json|mjs|md|yml|vbs)$/.test(path)) {
       const text = await readFile(path, 'utf8');
-      assert.ok(!/sk-or-v1-[a-zA-Z0-9]{16,}|sk-ant-[a-zA-Z0-9_-]{16,}|ghp_[a-zA-Z0-9]{20,}/.test(text), 'Credential-like value in repository');
+      const credentialPatterns = [
+        /sk-(?:or-v1-|proj-)[a-zA-Z0-9_-]{16,}/,
+        /sk-ant-[a-zA-Z0-9_-]{16,}/,
+        /github_pat_[a-zA-Z0-9_]{20,}/,
+        /gh[pousr]_[a-zA-Z0-9]{20,}/,
+        /AKIA[0-9A-Z]{16}/,
+        /xox[baprs]-[a-zA-Z0-9-]{20,}/,
+        /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/,
+        /https?:\/\/[^\s/@:]+:[^\s/@]+@/,
+        /Bearer\s+[a-zA-Z0-9._~+/=-]{24,}/
+      ];
+      assert.ok(!credentialPatterns.some(pattern => pattern.test(text)), 'Credential-like value in repository');
     }
   }
 }
