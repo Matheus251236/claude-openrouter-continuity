@@ -1,6 +1,15 @@
 {
   "name": "openrouter-continuity",
-  "version": "0.2.0",
-  "description": "Experimental: registra limites e pode reiniciar o Desktop no Gateway configurado. A recuperação permanece desativada por padrão.",
-  "author": { "name": "Claude Continuity Lab" }
+  "version": "0.3.0",
+  "description": "Biblioteca experimental de transporte Anthropic/OpenRouter, sem reiniciar o Claude Desktop.",
+  "author": { "name": "Claude Continuity Lab" },
+  "userConfig": {
+    "openrouter_api_key": {
+      "type": "string",
+      "title": "OpenRouter API Key",
+      "description": "Chave usada somente nas tentativas de fallback enviadas ao OpenRouter.",
+      "sensitive": true,
+      "required": true
+    }
+  }
 }

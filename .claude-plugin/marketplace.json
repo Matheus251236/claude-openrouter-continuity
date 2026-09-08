@@ -5,7 +5,7 @@
   "plugins": [{
     "name": "openrouter-continuity",
     "source": "./plugins/openrouter-continuity",
-    "description": "Diagnóstico de limites e recuperação experimental por reinício no Gateway configurado. Desativada por padrão.",
-    "version": "0.2.0"
+    "description": "Transporte experimental Anthropic/OpenRouter com configuração segura de chave. Não reinicia o Desktop.",
+    "version": "0.3.0"
   }]
 }

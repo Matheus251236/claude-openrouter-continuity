@@ -1,73 +1,41 @@
-# Investigação da integração com Claude Desktop
+# Limite de integração com a aba Code
 
-Data: 7 de setembro de 2026.
+## Fluxo implementado
 
-## Objetivo de aceitação
-
-O usuário permanece na aba Code, com sua conta e sessão atual. Enquanto a assinatura aceita chamadas, elas usam a assinatura. Quando o limite é atingido, a próxima resposta usa OpenRouter e aparece na mesma sessão, sem precisar operar Claude em um terminal.
-
-## Evidência local
-
-Foi encontrada a versão Windows Store **1.46388.4.0** em execução. A inspeção foi somente de leitura nos módulos distribuídos dentro de `resources/app.asar`. Código proprietário, arquivos de login e dados pessoais não foram copiados para este repositório.
-
-A configuração de ambiente do aplicativo reserva variáveis de endereço de API e autenticação. O construtor do ambiente do processo Code atribui o host e credenciais de acordo com o provedor do aplicativo. O modo Gateway fornece credenciais próprias e limpa o campo de OAuth de assinatura. Há também um mecanismo de atualização das credenciais pelo host.
-
-Esses achados indicam que editar variáveis de um subprocesso de hook não altera automaticamente o cliente de API do processo pai. Também tornam frágil qualquer tentativa de alterar arquivos de ambiente esperando que o Desktop conserve a alteração.
-
-Não executamos injeção de código, patch de `app.asar`, leitura de tokens, captura de tráfego, interceptação TLS ou encerramento de processos. Não foi encontrado um mecanismo de hot-swap exposto ao plugin na documentação ou nas partes inspecionadas. Isso é uma conclusão limitada à investigação realizada, não uma prova matemática de impossibilidade.
-
-## Evidência documental
-
-A [configuração Desktop](https://code.claude.com/docs/en/llm-gateway-connect#desktop-app) usa as preferências de inferência de terceiros, separadas das variáveis usadas pela CLI. O [guia OpenRouter](https://openrouter.ai/docs/cookbook/coding-agents/claude-desktop-integration) descreve aplicar a configuração, reiniciar e entrar com Gateway. A versão 0.2 automatiza somente esse reinício e a escolha do Gateway já configurado; ela não transforma esse fluxo em hot-swap.
-
-O [evento StopFailure](https://code.claude.com/docs/en/hooks#stopfailure) informa erros de API. Seu retorno não fornece uma decisão de substituição da resposta ou do provedor. Por isso, este plugin usa o evento apenas como evidência diagnóstica.
-
-## Arquitetura implementada e parte ausente
-
-```text
-Claude Desktop, sessão atual
+~~~text
+adaptador que possua a requisição antes do envio
         |
-        | ADAPTADOR DE SESSÃO AUSENTE / NÃO VALIDADO
         v
-createContinuityTransport().send(requisição, headers da sessão)
+createContinuityTransport().send(body, headers)
         |
-        +--> Anthropic --> resposta normal --> chamador
+        +--> Anthropic /v1/messages --> resposta Anthropic
         |
-        +--> erro de limite reconhecido
+        +--> HTTP 429
                  |
-                 +--> OpenRouter, credencial separada --> chamador
+                 +--> converte pedido Anthropic para Chat Completions
+                 +--> OpenRouter /api/v1/chat/completions
+                 +--> converte JSON/SSE para o formato Anthropic
+                 +--> devolve Response ao adaptador
+~~~
 
-Plugin instalado --> StopFailure --> registro local mínimo
-                 |               --> se armado: fechamento normal
-                 |                              --> reabre Desktop
-                 |                              --> seleciona Gateway
-                 +--> MCP continuity_status / continuity_set_recovery
-```
+Todo o contador e o mapeamento ficam na instância JavaScript. Nenhum estado de recuperação é gravado em disco e nenhum processo é reiniciado.
 
-O módulo de transporte não lê credenciais por conta própria. O futuro adaptador precisaria receber a requisição que o cliente já ia enviar e mantê-la no mesmo fluxo. Seus destinos são fixos e HTTPS: Anthropic primário, OpenRouter secundário. O retorno da segunda chamada continua no mesmo `send()`; nenhuma sessão é criada por esse módulo.
+## Ponto ausente no Claude Desktop
 
-As mensagens e IDs de ferramentas permanecem intactos no teste. Metadados externos de conta e headers de autenticação não são repassados para o segundo provedor. Nenhum conteúdo de requisição ou erro bruto é registrado.
+Um plugin pode fornecer skills, agentes, hooks, MCP, LSP e componentes experimentais documentados. Um MCP server fornece ferramentas externas ao modelo; ele não substitui o cliente HTTP usado pelo host para chamar o próprio modelo.
 
-## Recuperação experimental 0.2
+O evento StopFailure contém a categoria do erro depois que o turno termina. A documentação diz que esse evento não possui controle de decisão e que sua saída e seu código são ignorados. Portanto, ele não consegue substituir o erro por outro stream.
 
-O auxiliar Windows usa UI Automation apenas na janela do processo Claude. Ele não lê nem grava a chave do Gateway. A configuração fica sob responsabilidade do formulário oficial do Desktop. Se o aplicativo não fechar normalmente, nenhum processo é forçado. O recurso é opt-in e fica desarmado após a instalação.
+Também não é suficiente sobrescrever globalThis.fetch no processo MCP: o MCP roda como subprocesso separado, com memória e rede próprias. Isso não altera o JavaScript nem o cliente HTTP do Claude Desktop.
 
-O teste `DryRun` carrega as bibliotecas de UI Automation e valida os argumentos sem fechar ou abrir aplicativos. O teste real ainda exige configurar o OpenRouter, reiniciar o Desktop e comprovar que a sessão salva volta a abrir no Gateway.
+Para usar o transporte com a sessão nativa, a Anthropic precisaria expor middleware de transporte antes da chamada, callback de retry com resposta substituta, gateway por requisição que preserve a assinatura no primeiro destino, ou API pública para trocar o provedor de uma sessão ativa. Nenhum desses mecanismos aparece na referência atual.
 
-## Próxima etapa necessária
+## Compatibilidade do protocolo
 
-Investigar com a Anthropic uma extensão de transporte na aba Code que permita conectar o intermediário a uma sessão ativa. Se um ponto suportado aparecer, criar um adaptador pequeno e específico à versão e testá-lo primeiro em uma sessão descartável. O acesso ao GitHub permite publicar o código, mas não resolve este bloqueio técnico. Uma chave OpenRouter também não o resolve sozinha.
+O endpoint solicitado, /api/v1/chat/completions, usa o protocolo OpenAI. Retornar seu stream diretamente para um chamador Anthropic seria incompatível. O transporte converte system, mensagens, ferramentas, tool_use, tool_result, razões de parada, tokens, eventos SSE e erros.
 
-Para validar a recuperação, configurar o Gateway pelo formulário oficial, manter o recurso desarmado, realizar um reinício manual e confirmar que o Desktop conserva a sessão. Só então armar o fechamento automático. Não apresentar o reinício como hot-swap dentro do processo.
+O OpenRouter também oferece /api/v1/messages, que reduz a necessidade de conversão. A versão 0.3 mantém Chat Completions para atender ao desenho solicitado e torna a tradução explícita e testável.
 
-## Testes de aceitação ainda pendentes
+## Critério para declarar fallback automático
 
-1. Provar que uma chamada da sessão Code real chega ao transporte usando a autenticação original.
-2. Simular a resposta de limite sem gastar toda a assinatura do usuário.
-3. Obter uma resposta real OpenRouter e exibi-la na mesma sessão e aba.
-4. Confirmar que nenhuma ação de ferramenta foi repetida e que seus IDs continuam válidos.
-5. Validar thinking, anexos, compactação, cancelamento, reconexão e troca de modelo.
-6. Verificar renovação da credencial da assinatura e retorno ao primário após o limite se restabelecer.
-7. Validar instalação, atualização e remoção via marketplace em Windows, sem uso de Bash pelo usuário.
-
-Até esses critérios serem cumpridos, o projeto deve continuar marcado como experimental e a ferramenta MCP deve informar `automaticFallbackActive: false`.
+automaticFallbackActive só poderá mudar para true depois que uma requisição real da aba Code chegar ao transporte antes da Anthropic, receber um 429 simulado e exibir o stream OpenRouter na mesma sessão. Até lá o plugin permanece uma biblioteca pronta para um adaptador, sem alegar interceptação inexistente.

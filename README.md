@@ -1,85 +1,115 @@
 # Claude OpenRouter Continuity
 
-Protótipo para desenvolver continuidade da **mesma sessão na aba Code do Claude Desktop**, usando primeiro a assinatura Claude e, após um erro de limite, o OpenRouter.
+Plugin experimental e biblioteca de transporte para estudar fallback de uma chamada Anthropic para o OpenRouter sem reiniciar o sistema operacional nem o Claude Desktop.
 
-**Estado: experimental. O hot-swap dentro do processo do Desktop não é suportado.** A versão 0.2 acrescenta uma recuperação opt-in para Windows: depois de um erro de limite, ela pode fechar o Claude normalmente, reabrir o aplicativo e selecionar o Gateway já configurado. O modo permanece desativado por padrão. Não há chave incluída nem cobrança ao instalar ou testar.
+## Estado real da integração
 
-## O que foi implementado
+A biblioteca implementa o retry em memória: chama a Anthropic, captura um HTTP 429, converte o pedido para OpenRouter Chat Completions, faz a segunda chamada e converte a resposta de volta para o formato Anthropic. Ela conserva texto, ferramentas e IDs de chamadas nos formatos cobertos pelos testes.
 
-- Marketplace de plugins Claude em `.claude-plugin/marketplace.json`.
-- Plugin `openrouter-continuity`, com hook `StopFailure` e servidor MCP local.
-- Registro mínimo do último erro de limite/cobrança, sem histórico, credenciais ou ID original da sessão.
-- Ferramenta `continuity_status`, que informa o estado real do diagnóstico e da recuperação.
-- Ferramenta `continuity_set_recovery`, que arma ou desarma a recuperação somente após uma ação explícita.
-- Auxiliar Windows que nunca força o encerramento do Claude, não lê credenciais e só procura o botão de Gateway dentro da janela do próprio aplicativo.
-- Transporte de laboratório: tenta Anthropic, reconhece determinados erros de limite e repete a requisição no endpoint Messages do OpenRouter.
-- Preservação das mensagens, instruções, definições de ferramentas e referências entre `tool_use` e `tool_result`.
-- Credenciais separadas, bloqueio de redirects HTTP, limite local de tentativas pagas e cancelamento de requisições.
-- SSE: permite fallback antes do início da mensagem; preserva o fluxo e não repete uma resposta já iniciada.
-- Testes sem rede externa, contas reais ou consumo de tokens.
+O sistema de plugins do Claude Code não oferece um interceptor para as requisições do próprio modelo. MCP adiciona ferramentas que o Claude pode chamar, e StopFailure ocorre depois que a chamada do modelo já falhou. Por isso, instalar este repositório na aba Plugins não conecta automaticamente a sessão nativa a createContinuityTransport().send().
 
-O fallback de transporte continua a mesma chamada da API. **Isso ainda não está conectado ao processo real do Desktop.** A recuperação 0.2 contorna essa ausência reiniciando o aplicativo; a conversa continua salva pelo Claude, mas a retomada automática da mesma tela ainda precisa de um teste real.
+O status do plugin informa essa diferença por meio de:
 
-## Usar sem terminal
+- desktopRoutingAttached: false
+- automaticFallbackActive: false
 
-No Windows, abra **Verificar prototipo.vbs** com dois cliques. Ele executa os testes locais em segundo plano e abre um relatório no navegador. É necessário Node.js 22 ou superior. O relatório aparece em `runtime/report.html` e não entra no Git.
+O código não afirma que existe hot-swap na sessão nativa enquanto esse ponto de extensão não existir.
 
-Para instalar o plugin experimental pelo Claude Desktop:
+## Configurar a OpenRouter API Key sem terminal
 
-1. Abra a aba Code e o gerenciador de Plugins.
-2. Adicione `https://github.com/Matheus251236/claude-openrouter-continuity` como marketplace; o nome do marketplace é `claude-continuity-lab`.
-3. Instale `openrouter-continuity`.
-4. Se solicitado pelo Claude, recarregue os plugins. Peça para consultar a ferramenta `continuity_status`.
-5. Configure o OpenRouter em **Developer → Configure Third-Party Inference** antes de armar a recuperação.
-6. Somente depois da configuração e de um teste de reinício, peça ao Claude para usar `continuity_set_recovery` com `enabled: true`.
+A versão 0.3.0 declara uma opção sensível chamada **OpenRouter API Key**. Quando o Claude Desktop instalar ou atualizar o plugin, abra:
 
-Em repositórios privados, o mecanismo Git usado pelo Claude precisa ter acesso ao repositório. Estar conectado ao GitHub no navegador não garante essa autenticação. Os nomes dos botões podem variar entre versões.
+1. **Configurações → Plugins → Openrouter continuity → Gerenciar/Configurar**.
+2. Localize **OpenRouter API Key**.
+3. Cole a chave diretamente nesse campo mascarado e salve.
+4. Recarregue os plugins quando o Claude solicitar.
 
-Não é necessário usar o Claude via Bash. Os componentes usam Node e, no Windows, um processo PowerShell oculto com argumentos separados. A política de execução é ignorada somente para esse processo; a configuração do sistema não é alterada.
+O Claude guarda o valor no armazenamento seguro usado para configurações sensíveis. O arquivo .mcp.json apenas injeta o valor no processo local como OPENROUTER_API_KEY:
 
-## Bloqueio de integração
+~~~json
+{
+  "env": {
+    "OPENROUTER_API_KEY": "${user_config.openrouter_api_key}"
+  }
+}
+~~~
 
-Para alcançar um hot-swap sem reinício, a chamada do processo **já em execução** precisaria passar pelo transporte antes de receber a resposta de erro. Um hook depois da falha não substitui essa chamada sozinho: a documentação do `StopFailure` diz que saída e código de retorno são ignorados.
+Não coloque a chave no repositório, no README, em .env versionado ou em mensagens de chat. A chave nunca é retornada pela ferramenta continuity_status.
 
-A investigação da versão Windows instalada encontrou a configuração de host e de autenticação na inicialização do processo da aba Code. A documentação atual também separa o modo de assinatura do modo Gateway. Não foi identificado um ponto de extensão de plugin que conecte o transporte à sessão já aberta.
+## Transporte em memória
 
-Não modificamos binários do Claude, certificados, login ou tokens da conta. Não há adaptador que extraia credenciais de arquivos de login. A recuperação só usa a opção de Gateway que o usuário já configurou no próprio Claude Desktop.
+O módulo plugins/openrouter-continuity/src/transport.mjs exporta:
 
-Veja [a investigação e os critérios de conclusão](docs/integration.md).
+- translateAnthropicModel(model, overrides): remove sufixos de data e normaliza famílias como claude-3-5-sonnet-20241022 para anthropic/claude-3.5-sonnet.
+- toOpenRouterChatRequest(body, modelMap): converte Anthropic Messages para OpenRouter Chat Completions.
+- createContinuityTransport(options): tenta https://api.anthropic.com/v1/messages e, somente em HTTP 429, tenta https://openrouter.ai/api/v1/chat/completions.
 
-## Desenvolvimento
+O fallback:
 
-```text
+- usa somente a chave OpenRouter na segunda chamada;
+- não encaminha cookies, OAuth, chave Anthropic ou metadata de conta ao OpenRouter;
+- converte respostas JSON, erros e streams SSE de volta para eventos Anthropic;
+- limita o número de tentativas OpenRouter por instância;
+- volta a testar a Anthropic no turno seguinte.
+
+Um integrador compatível ainda precisa fornecer ao transporte o corpo e os headers da requisição antes da chamada nativa:
+
+~~~js
+const transport = createContinuityTransport();
+const response = await transport.send(anthropicBody, anthropicSessionHeaders);
+~~~
+
+Esse adaptador não pode ser criado com MCP, skill ou hook depois da instalação. Ele precisaria ser exposto pela Anthropic no host da aba Code ou configurado como o gateway de todas as chamadas desde o início.
+
+## Remoções da versão 0.3
+
+Foram eliminados:
+
+- restart-to-gateway.ps1;
+- recovery.mjs;
+- state.mjs;
+- gravação de falhas e configuração em disco;
+- hook StopFailure;
+- ferramenta continuity_set_recovery.
+
+O plugin não fecha, encerra nem reabre o Claude.
+
+## Instalação pelo Claude Desktop
+
+Adicione este repositório como marketplace:
+
+~~~text
+https://github.com/Matheus251236/claude-openrouter-continuity
+~~~
+
+Depois instale ou atualize **openrouter-continuity** e configure a chave no campo sensível descrito acima. Não é necessário operar o Claude via Bash.
+
+## Desenvolvimento e testes
+
+~~~text
 node scripts/validate.mjs
 node --test tests/*.test.mjs
-node scripts/verify.mjs
-```
+~~~
 
-Sem dependências npm. Os 29 testes passam localmente; a matriz do GitHub Actions cobre Windows e Linux. Esses testes usam respostas simuladas, e o auxiliar Windows é executado apenas em modo `DryRun`: não encerram o Claude, não usam contas e não consomem tokens.
+Os testes não fazem chamadas externas e usam credenciais obviamente sintéticas. Eles validam tradução dinâmica de modelos, conversão de mensagens e ferramentas, fallback somente em HTTP 429, isolamento das credenciais, JSON e SSE, remoção do reinício e configuração sensível.
 
-O módulo está em `plugins/openrouter-continuity/src/transport.mjs`. Ele permanece desabilitado por padrão. `enabled: true` e uma chave passada em memória habilitam fallback somente para o chamador que explicitamente usar `send()`. Não existe serviço de rede aberto, inicialização automática de proxy ou ativação de cobrança nesta versão.
+## Limitações
 
-O limite `maxFallbackRequests` é uma quantidade de tentativas por instância, **não um limite monetário**. Para uma futura operação real, a chave do OpenRouter deverá ter um orçamento configurado na conta. Reiniciar o módulo zera esse contador.
+- Não prevê quando a cota semanal acabará; reage a HTTP 429.
+- Não repete uma resposta primária parcialmente emitida.
+- Blocos Anthropic sem equivalente seguro em Chat Completions geram erro local.
+- O normalizador cobre convenções de nomes; modelos futuros podem precisar de modelMap.
+- Recursos proprietários da assinatura, thinking assinado, ferramentas hospedadas e compactação exigem testes próprios.
+- O limite local de tentativas não é monetário. Configure orçamento e limites também no OpenRouter.
 
-## Limitações conhecidas
-
-- Não detecta antecipadamente o saldo semanal: reage ao erro retornado pela API.
-- Um erro `rate_limit_error` pode ser temporário; não prova que a cota semanal acabou.
-- Não há validação com assinatura real, API OpenRouter, thinking assinado, compactação, ferramentas hospedadas ou funções exclusivas de conta.
-- O corpo de erro HTTP deve ser JSON reconhecido; SSE deve trazer o erro antes do início da mensagem. Outros casos são devolvidos ao chamador.
-- A requisição OpenRouter remove metadados de conta e headers OAuth; conserva o conteúdo da conversa, que seria enviado ao OpenRouter quando habilitado.
-- O modelo original é mantido, ou traduzido por um `modelMap` explícito. O provedor é limitado a Anthropic no corpo do pedido. A compatibilidade desses campos com a versão atual do endpoint OpenRouter ainda exige teste real.
-- Não promete migrar uma sessão existente, manter recursos de nuvem ou retomar uma resposta parcialmente emitida.
-- A recuperação 0.2 reinicia o aplicativo. Ela aborta se o Claude não fechar normalmente e nunca usa encerramento forçado.
-- O Gateway precisa estar configurado previamente. Se o botão “Continuar com Gateway” não aparecer em 60 segundos, a recuperação registra a falha e para.
+Veja [a análise do ponto de integração](docs/integration.md).
 
 ## Referências
 
-- [OpenRouter no Claude Desktop](https://openrouter.ai/docs/cookbook/coding-agents/claude-desktop-integration)
-- [Configuração de gateway por interface](https://code.claude.com/docs/en/llm-gateway-connect#desktop-app)
-- [Assinaturas e gateways](https://code.claude.com/docs/en/llm-gateway#subscriptions-and-gateways)
+- [Plugins do Claude Code](https://code.claude.com/docs/en/plugins-reference)
 - [Hooks e StopFailure](https://code.claude.com/docs/en/hooks#stopfailure)
-- [Referência de plugins](https://code.claude.com/docs/en/plugins-reference)
-- [Marketplaces](https://code.claude.com/docs/en/plugin-marketplaces)
+- [MCP no Claude Code](https://code.claude.com/docs/en/mcp)
+- [OpenRouter Chat Completions](https://openrouter.ai/docs/api/api-reference/chat/send-chat-completion-request)
+- [OpenRouter Anthropic Messages](https://openrouter.ai/docs/api/api-reference/anthropic-messages/create-messages)
 
-Este é um projeto independente, sem afiliação com Anthropic ou OpenRouter.
+Projeto independente, sem afiliação com Anthropic ou OpenRouter.

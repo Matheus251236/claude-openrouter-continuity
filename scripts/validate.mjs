@@ -14,18 +14,17 @@ assert.ok(entry.source.startsWith('./plugins/'));
 const pluginRoot = entry.source.slice(2);
 const manifest = await read(`${pluginRoot}/.claude-plugin/plugin.json`);
 assert.equal(manifest.name, entry.name);
+assert.equal(manifest.version, entry.version);
 assert.match(manifest.version, /^\d+\.\d+\.\d+$/);
-const hook = await read(`${pluginRoot}/hooks/hooks.json`);
-assert.deepEqual(Object.keys(hook.hooks), ['StopFailure']);
-const handler = hook.hooks.StopFailure[0].hooks[0];
-assert.equal(handler.command, 'node');
+assert.equal(manifest.userConfig.openrouter_api_key.sensitive, true);
+assert.equal(manifest.userConfig.openrouter_api_key.required, true);
 const mcp = await read(`${pluginRoot}/.mcp.json`);
 assert.equal(mcp.mcpServers.continuity.command, 'node');
-for (const path of [...handler.args, ...mcp.mcpServers.continuity.args]) {
+assert.equal(mcp.mcpServers.continuity.env.OPENROUTER_API_KEY, '${user_config.openrouter_api_key}');
+for (const path of mcp.mcpServers.continuity.args) {
   assert.ok(path.startsWith('${CLAUDE_PLUGIN_ROOT}/'));
   await access(join(root, pluginRoot, path.replace('${CLAUDE_PLUGIN_ROOT}/', '')));
 }
-await access(join(root, pluginRoot, 'scripts/restart-to-gateway.ps1'));
 async function inspect(dir) {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     if (['.git', 'runtime', 'node_modules'].includes(entry.name)) continue;
@@ -49,4 +48,4 @@ async function inspect(dir) {
   }
 }
 await inspect(root);
-console.log('Manifest, marketplace, hook and MCP paths validated; no credential patterns found. This is a local structural check, not Claude Desktop installation validation.');
+console.log('Manifest, marketplace, sensitive user configuration and MCP paths validated; no credential patterns found. This is a local structural check, not a Claude Desktop routing validation.');
